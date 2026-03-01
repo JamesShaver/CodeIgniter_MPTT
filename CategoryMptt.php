@@ -437,10 +437,10 @@ class CategoryMPTT
             ->get()
             ->getResultArray();
 
-        $right = $left + 1;
+        $right = ($parentId === null) ? $left : $left + 1;
 
         foreach ($children as $child) {
-            $right = $this->rebuildRecursive((int)$child[$this->idCol], $right, $depth + 1);
+            $right = $this->rebuildRecursive((int)$child[$this->idCol], $right, ($parentId === null) ? $depth : $depth + 1);
         }
 
         if ($parentId !== null) {
@@ -470,7 +470,7 @@ class CategoryMPTT
     {
         // ensure slug
         if (!isset($data['slug']) && isset($data['name'])) {
-            helper('text');
+            helper('url');
             $data['slug'] = url_title($data['name'], '-', true);
         }
 
