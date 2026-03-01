@@ -68,7 +68,7 @@ class CategoryMPTT
 
         // Load from DB (ignore soft-deleted nodes)
         $rows = $this->db->table($this->table)
-            ->where($this->deletedAtCol, null)
+            ->where($this->deletedAtCol . ' IS NULL')
             ->orderBy($this->leftCol, 'ASC')
             ->get()
             ->getResultArray();
@@ -379,7 +379,7 @@ class CategoryMPTT
     public function verifyTree(): bool
     {
         $rows = $this->db->table($this->table)
-            ->where($this->deletedAtCol, null)
+            ->where($this->deletedAtCol . ' IS NULL')
             ->orderBy($this->leftCol, 'ASC')
             ->get()
             ->getResultArray();
@@ -431,8 +431,8 @@ class CategoryMPTT
     {
         // get direct children ordered by name (or by left if you prefer)
         $children = $this->db->table($this->table)
-            ->where($this->parentCol, $parentId)
-            ->where($this->deletedAtCol, null)
+            ->where($parentId === null ? "{$this->parentCol} IS NULL" : "{$this->parentCol} = {$parentId}")
+            ->where($this->deletedAtCol . ' IS NULL')
             ->orderBy('name', 'ASC')
             ->get()
             ->getResultArray();
@@ -486,7 +486,7 @@ class CategoryMPTT
             $r = $maxRight + 2;
             $depth = 0;
         } else {
-            $target = $this->db->table($this->table)->where($this->idCol, $targetId)->where($this->deletedAtCol, null)->get()->getRowArray();
+            $target = $this->db->table($this->table)->where($this->idCol, $targetId)->where($this->deletedAtCol . ' IS NULL')->get()->getRowArray();
             if (!$target) throw new InvalidArgumentException("Target id {$targetId} not found");
 
             switch ($position) {
@@ -514,9 +514,9 @@ class CategoryMPTT
                     throw new InvalidArgumentException('Invalid position: ' . $position);
             }
 
-            // open gap of size 2 at destLeft
-            $this->db->simpleQuery("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} + 2 WHERE {$this->rightCol} >= ?", [$destLeft]);
-            $this->db->simpleQuery("UPDATE {$this->table} SET {$this->leftCol}  = {$this->leftCol}  + 2 WHERE {$this->leftCol}  >= ?", [$destLeft]);
+            // open gap of size 2 at destLeft (lft first to avoid double-shift)
+            $this->db->query("UPDATE {$this->table} SET {$this->leftCol}  = {$this->leftCol}  + 2 WHERE {$this->leftCol}  >= ?", [$destLeft]);
+            $this->db->query("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} + 2 WHERE {$this->rightCol} >= ?", [$destLeft]);
 
             $l = $destLeft;
             $r = $destLeft + 1;
@@ -541,13 +541,13 @@ class CategoryMPTT
     protected function copyNode(int $nodeId, ?int $targetId, string $position = 'lastChild'): int
     {
         // fetch node and its descendants (including self) - include lft/rgt/depth/parent
-        $node = $this->db->table($this->table)->where($this->idCol, $nodeId)->where($this->deletedAtCol, null)->get()->getRowArray();
+        $node = $this->db->table($this->table)->where($this->idCol, $nodeId)->where($this->deletedAtCol . ' IS NULL')->get()->getRowArray();
         if (!$node) throw new InvalidArgumentException("Node {$nodeId} not found");
 
         $descendants = $this->db->table($this->table)
             ->where($this->leftCol . ' >=', $node[$this->leftCol])
             ->where($this->rightCol . ' <=', $node[$this->rightCol])
-            ->where($this->deletedAtCol, null)
+            ->where($this->deletedAtCol . ' IS NULL')
             ->orderBy($this->leftCol, 'ASC')
             ->get()
             ->getResultArray();
@@ -563,7 +563,7 @@ class CategoryMPTT
             $newDepthForRoot = 0;
             $newParentForRoot = null;
         } else {
-            $target = $this->db->table($this->table)->where($this->idCol, $targetId)->where($this->deletedAtCol, null)->get()->getRowArray();
+            $target = $this->db->table($this->table)->where($this->idCol, $targetId)->where($this->deletedAtCol . ' IS NULL')->get()->getRowArray();
             if (!$target) throw new InvalidArgumentException("Target {$targetId} not found");
             switch ($position) {
                 case 'firstChild':
@@ -591,9 +591,9 @@ class CategoryMPTT
             }
         }
 
-        // Open gap of size $width at destLeft
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} + {$width} WHERE {$this->rightCol} >= ?", [$destLeft]);
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->leftCol}  = {$this->leftCol}  + {$width} WHERE {$this->leftCol}  >= ?", [$destLeft]);
+        // Open gap of size $width at destLeft (lft first to avoid double-shift)
+        $this->db->query("UPDATE {$this->table} SET {$this->leftCol}  = {$this->leftCol}  + {$width} WHERE {$this->leftCol}  >= ?", [$destLeft]);
+        $this->db->query("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} + {$width} WHERE {$this->rightCol} >= ?", [$destLeft]);
 
         $offset = $destLeft - $nodeL;
         $idMap = []; // oldId => newId
@@ -652,7 +652,7 @@ class CategoryMPTT
      */
     protected function deleteSubtree(int $nodeId): bool
     {
-        $node = $this->db->table($this->table)->where($this->idCol, $nodeId)->where($this->deletedAtCol, null)->get()->getRowArray();
+        $node = $this->db->table($this->table)->where($this->idCol, $nodeId)->where($this->deletedAtCol . ' IS NULL')->get()->getRowArray();
         if (!$node) return false;
 
         $l = (int)$node[$this->leftCol];
@@ -663,8 +663,8 @@ class CategoryMPTT
         $this->db->table($this->table)->where($this->leftCol . ' >=', $l)->where($this->rightCol . ' <=', $r)->delete();
 
         // close the gap
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->leftCol}  = {$this->leftCol}  - ? WHERE {$this->leftCol}  > ?", [$width, $r]);
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} - ? WHERE {$this->rightCol} > ?", [$width, $r]);
+        $this->db->query("UPDATE {$this->table} SET {$this->leftCol}  = {$this->leftCol}  - ? WHERE {$this->leftCol}  > ?", [$width, $r]);
+        $this->db->query("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} - ? WHERE {$this->rightCol} > ?", [$width, $r]);
 
         return true;
     }
@@ -679,8 +679,8 @@ class CategoryMPTT
         if ($nodeId === $targetId) throw new InvalidArgumentException('Cannot move node relative to itself');
 
         // fetch node & target
-        $node = $this->db->table($this->table)->where($this->idCol, $nodeId)->where($this->deletedAtCol, null)->get()->getRowArray();
-        $target = $this->db->table($this->table)->where($this->idCol, $targetId)->where($this->deletedAtCol, null)->get()->getRowArray();
+        $node = $this->db->table($this->table)->where($this->idCol, $nodeId)->where($this->deletedAtCol . ' IS NULL')->get()->getRowArray();
+        $target = $this->db->table($this->table)->where($this->idCol, $targetId)->where($this->deletedAtCol . ' IS NULL')->get()->getRowArray();
 
         if (!$node || !$target) throw new InvalidArgumentException('Node or target not found');
 
@@ -721,24 +721,24 @@ class CategoryMPTT
         }
 
         // Step 1: mark subtree as negative (so it won't be affected by gap operations)
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->leftCol} = -{$this->leftCol}, {$this->rightCol} = -{$this->rightCol} WHERE {$this->leftCol} >= ? AND {$this->rightCol} <= ?", [$nodeL, $nodeR]);
+        $this->db->query("UPDATE {$this->table} SET {$this->leftCol} = -{$this->leftCol}, {$this->rightCol} = -{$this->rightCol} WHERE {$this->leftCol} >= ? AND {$this->rightCol} <= ?", [$nodeL, $nodeR]);
 
         // Step 2: close the gap left by subtree
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->leftCol} = {$this->leftCol} - ? WHERE {$this->leftCol} > ?", [$width, $nodeR]);
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} - ? WHERE {$this->rightCol} > ?", [$width, $nodeR]);
+        $this->db->query("UPDATE {$this->table} SET {$this->leftCol} = {$this->leftCol} - ? WHERE {$this->leftCol} > ?", [$width, $nodeR]);
+        $this->db->query("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} - ? WHERE {$this->rightCol} > ?", [$width, $nodeR]);
 
         // adjust destLeft if it was right of the subtree originally
         if ($destLeft > $nodeR) $destLeft -= $width;
 
         // Step 3: open gap at destLeft
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->leftCol} = {$this->leftCol} + ? WHERE {$this->leftCol} >= ?", [$width, $destLeft]);
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} + ? WHERE {$this->rightCol} >= ?", [$width, $destLeft]);
+        $this->db->query("UPDATE {$this->table} SET {$this->leftCol} = {$this->leftCol} + ? WHERE {$this->leftCol} >= ?", [$width, $destLeft]);
+        $this->db->query("UPDATE {$this->table} SET {$this->rightCol} = {$this->rightCol} + ? WHERE {$this->rightCol} >= ?", [$width, $destLeft]);
 
         // Step 4: move subtree back by converting negative to positive and applying offset, adjust depths
         $offset = $destLeft - $nodeL;
         $depthDelta = $newDepth - $nodeD;
 
-        $this->db->simpleQuery("UPDATE {$this->table} SET {$this->leftCol} = -{$this->leftCol} + ?, {$this->rightCol} = -{$this->rightCol} + ?, {$this->depthCol} = {$this->depthCol} + ? WHERE {$this->leftCol} < 0", [$offset, $offset, $depthDelta]);
+        $this->db->query("UPDATE {$this->table} SET {$this->leftCol} = -{$this->leftCol} + ?, {$this->rightCol} = -{$this->rightCol} + ?, {$this->depthCol} = {$this->depthCol} + ? WHERE {$this->leftCol} < 0", [$offset, $offset, $depthDelta]);
 
         // Update parent_id for the moved root node only
         $this->db->table($this->table)->where($this->idCol, $nodeId)->update([$this->parentCol => $newParent]);
